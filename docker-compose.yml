@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  jupyter:
+    image: jupyter/pyspark-notebook:latest
+    container_name: jupyter_notebook
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work/notebooks
+      - ./code:/home/jovyan/work/code
+      - ./data:/home/jovyan/work/data
+    networks:
+      - spark_network
+    depends_on:
+      - spark-master
+      - mongodb
+      - kafka
+    command: bash -c "pip install kafka-python pymongo nltk scikit-learn && start-notebook.sh"
+
+  spark-master:
+    image: bitnami/spark:3.5.0
+    container_name: spark_master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_WORKER_MEMORY=4g
+      - SPARK_WORKER_CORES=4
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    command: bash -c "pip install nltk && python -m nltk.downloader punkt && /opt/bitnami/spark/bin/spark-class org.apache.spark.deploy.master.Master"
+    networks:
+      - spark_network
+
+  spark-worker-1:
+    image: bitnami/spark:3.5.0
+    container_name: spark_worker_1
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=4g
+      - SPARK_WORKER_CORES=4
+    depends_on:
+      - spark-master
+    command: bash -c "pip install nltk && python -m nltk.downloader punkt && /opt/bitnami/spark/sbin/start-worker.sh spark://spark-master:7077"
+    networks:
+      - spark_network
+
+  spark-worker-2:
+    image: bitnami/spark:3.5.0
+    container_name: spark_worker_2
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=4g
+      - SPARK_WORKER_CORES=4
+    depends_on:
+      - spark-master
+    command: bash -c "pip install nltk && python -m nltk.downloader punkt && /opt/bitnami/spark/sbin/start-worker.sh spark://spark-master:7077"
+    networks:
+      - spark_network
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongo_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - spark_network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - spark_network
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - spark_network
+
+networks:
+  spark_network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
